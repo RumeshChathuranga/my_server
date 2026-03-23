@@ -1,115 +1,72 @@
 import { DynBuf, bufPop } from "../shared/buffer_utils";
-import { HTTPError, HTTPReq } from "../shared/http_types";
+import { HTTPReq, HTTPError } from "../shared/http_types";
 
-const kMaxHeaderLen = 1024 * 8;
+const MAX_HEADER_SIZE = 8 * 1024; // 8 KB — reject unreasonably large headers
 
-export function cutMessage(buf: DynBuf): null | HTTPReq {
-  const idx = buf.data.subarray(0, buf.length).indexOf("\r\n\r\n");
-  if (idx < 0) {
-    if (buf.length >= kMaxHeaderLen) {
-      throw new HTTPError(413, "header is too large");
+// Try to parse a complete HTTP request header from the buffer.
+// Returns null if the header is incomplete (we need more data).
+// Throws HTTPError for malformed requests.
+export function parseHTTPReq(buf: DynBuf): HTTPReq | null {
+  // HTTP headers end with a blank line: \r\n\r\n
+  const headerEnd = buf.data
+    .subarray(0, buf.length)
+    .indexOf("\r\n\r\n");
+
+  if (headerEnd < 0) {
+    if (buf.length > MAX_HEADER_SIZE) {
+      throw new HTTPError(431, "Request Header Fields Too Large");
     }
-    return null;
+    return null; // incomplete — read more data
   }
 
-  const msg = parseHTTPReq(buf.data.subarray(0, idx + 4));
-  bufPop(buf, idx + 4);
-  return msg;
-}
+  const headerData = buf.data.subarray(0, headerEnd).toString();
+  bufPop(buf, headerEnd + 4); // remove header + blank line from buffer
 
-//parse an HTTP request header
-export function parseHTTPReq(data: Buffer): HTTPReq {
-  const lines = splitLines(data);
-  if (lines.length < 2) {
-    throw new HTTPError(400, "bad request line");
+  const lines = headerData.split("\r\n");
+
+  if (lines.length === 0) {
+    throw new HTTPError(400, "Empty request");
   }
 
-  const { method, uri, version } = parseRequestLine(lines[0]);
-
-  const headers: Buffer[] = [];
-  for (let i = 1; i < lines.length - 1; i++) {
-    const h = Buffer.from(lines[i]); //copy
-    if (!validateHeader(h)) {
-      throw new HTTPError(400, "bad field");
-    }
-    headers.push(h);
+  // Parse request line: METHOD URI HTTP/VERSION
+  const requestLine = lines[0];
+  const parts = requestLine.split(" ");
+  if (parts.length !== 3) {
+    throw new HTTPError(400, `Bad request line: ${requestLine}`);
   }
 
-  if (lines[lines.length - 1].length !== 0) {
-    throw new HTTPError(400, "header not terminated");
+  const [method, uriStr, httpVersion] = parts;
+
+  if (!httpVersion.startsWith("HTTP/")) {
+    throw new HTTPError(400, `Unknown HTTP version: ${httpVersion}`);
   }
+
+  const version = httpVersion.slice(5); // "1.0" or "1.1"
+  if (version !== "1.0" && version !== "1.1") {
+    throw new HTTPError(505, `HTTP Version Not Supported: ${version}`);
+  }
+
+  const headers = lines.slice(1).map((line) => Buffer.from(line));
 
   return {
-    method,
-    uri,
+    method: method.toUpperCase(),
+    uri:    Buffer.from(uriStr),
     version,
     headers,
   };
 }
 
-export function fieldGet(headers: Buffer[], key: string): null | Buffer {
-  const keyLower = key.toLowerCase();
-  for (const header of headers) {
-    const line = header.toString("latin1");
-    const idx = line.indexOf(":");
-    if (idx <= 0) {
-      continue;
-    }
-    const name = line.slice(0, idx).trim().toLowerCase();
-    if (name === keyLower) {
-      const value = line.slice(idx + 1).trim();
-      return Buffer.from(value, "latin1");
+// Find the value of a named header field (case-insensitive).
+// Returns null if the header is not present.
+export function fieldGet(headers: Buffer[], name: string): Buffer | null {
+  const lower = name.toLowerCase();
+  for (const h of headers) {
+    const str = h.toString();
+    const colon = str.indexOf(":");
+    if (colon < 0) continue;
+    if (str.slice(0, colon).toLowerCase().trim() === lower) {
+      return Buffer.from(str.slice(colon + 1).trim());
     }
   }
   return null;
-}
-
-function splitLines(data: Buffer): Buffer[] {
-  const raw = data.toString("latin1").split("\r\n");
-  if (raw.length > 0 && raw[raw.length - 1] === "") {
-    raw.pop();
-  }
-  return raw.map((line) => Buffer.from(line, "latin1"));
-}
-
-function parseRequestLine(line: Buffer): {
-  method: string;
-  uri: Buffer;
-  version: string;
-} {
-  const text = line.toString("latin1");
-  const parts = text.split(" ").filter((p) => p.length > 0);
-  if (parts.length !== 3) {
-    throw new HTTPError(400, "bad request line");
-  }
-  const [method, uriText, versionText] = parts;
-  if (!method || !uriText || !versionText) {
-    throw new HTTPError(400, "bad request line");
-  }
-  if (!versionText.startsWith("HTTP/")) {
-    throw new HTTPError(400, "bad version");
-  }
-  const version = versionText.slice("HTTP/".length);
-  if (version !== "1.0" && version !== "1.1") {
-    throw new HTTPError(400, "bad version");
-  }
-  return {
-    method,
-    uri: Buffer.from(uriText, "latin1"),
-    version,
-  };
-}
-
-function validateHeader(header: Buffer): boolean {
-  const line = header.toString("latin1");
-  if (line.includes("\r") || line.includes("\n")) {
-    return false;
-  }
-  const idx = line.indexOf(":");
-  if (idx <= 0) {
-    return false;
-  }
-  const name = line.slice(0, idx).trim();
-  const token = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-  return token.test(name);
 }

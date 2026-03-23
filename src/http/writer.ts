@@ -1,53 +1,71 @@
-import { HTTPRes } from "../shared/http_types";
-import { soWrite, TCPConn } from "../shared/tcp_conn";
-import { fieldGet } from "./parser";
+import { TCPConn, soWrite } from "../shared/tcp_conn";
+import { HTTPRes, BodyReader } from "../shared/http_types";
 
-const kStatusText: Record<number, string> = {
-  200: "OK",
-  400: "Bad Request",
-  404: "Not Found",
-  413: "Payload Too Large",
-  500: "Internal Server Error",
-  501: "Not Implemented",
-};
-
-export function encodeHTTPResp(resp: HTTPRes): Buffer {
-  const reason = kStatusText[resp.code] ?? "OK";
-  const chunks: Buffer[] = [];
-
-  chunks.push(Buffer.from(`HTTP/1.1 ${resp.code} ${reason}\r\n`));
-  for (const header of resp.headers) {
-    chunks.push(header);
-    chunks.push(Buffer.from("\r\n"));
-  }
-  chunks.push(Buffer.from("\r\n"));
-
-  return Buffer.concat(chunks);
+// Encode one HTTP chunk: hex-size CRLF data CRLF
+function encodeChunk(data: Buffer): Buffer {
+  const sizeLine = Buffer.from(data.length.toString(16) + "\r\n");
+  const crlf     = Buffer.from("\r\n");
+  return Buffer.concat([sizeLine, data, crlf]);
 }
 
-export async function writeHTTPResp(conn: TCPConn, resp: HTTPRes): Promise<void> {
-  if (resp.body.length < 0) {
-    throw new Error("chunked encoding not supported");
+// Write a complete HTTP response (status line + headers + body) to the socket.
+export async function writeHTTPResp(conn: TCPConn, res: HTTPRes): Promise<void> {
+  // Determine transfer mode
+  const isChunked = res.body.length < 0;
+
+  // --- Status line ---
+  const statusMessages: Record<number, string> = {
+    200: "OK",
+    206: "Partial Content",
+    304: "Not Modified",
+    400: "Bad Request",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    413: "Payload Too Large",
+    431: "Request Header Fields Too Large",
+    500: "Internal Server Error",
+    505: "HTTP Version Not Supported",
+    101: "Switching Protocols",
+  };
+
+  const statusText = statusMessages[res.code] ?? "Unknown";
+  const statusLine = Buffer.from(`HTTP/1.1 ${res.code} ${statusText}\r\n`);
+  await soWrite(conn, statusLine);
+
+  // --- Headers ---
+  // Add Content-Length or Transfer-Encoding
+  const extraHeaders: Buffer[] = [];
+
+  if (isChunked) {
+    extraHeaders.push(Buffer.from("Transfer-Encoding: chunked"));
+  } else {
+    extraHeaders.push(Buffer.from(`Content-Length: ${res.body.length}`));
   }
 
-  if (!fieldGet(resp.headers, "Content-Length")) {
-    resp.headers.push(Buffer.from(`Content-Length: ${resp.body.length}`));
+  for (const hdr of [...res.headers, ...extraHeaders]) {
+    await soWrite(conn, Buffer.concat([hdr, Buffer.from("\r\n")]));
   }
 
-  const header = encodeHTTPResp(resp);
-  if (header.length > 0) {
-    await soWrite(conn, header);
-  }
+  // Blank line separating headers from body
+  await soWrite(conn, Buffer.from("\r\n"));
 
+  // --- Body ---
   while (true) {
-    const data = await resp.body.read();
+    const data = await res.body.read();
+
     if (data.length === 0) {
+      // EOF
+      if (isChunked) {
+        // Terminating zero-length chunk
+        await soWrite(conn, Buffer.from("0\r\n\r\n"));
+      }
       break;
     }
-    await soWrite(conn, data);
-  }
 
-  if (resp.body.close) {
-    await resp.body.close();
+    if (isChunked) {
+      await soWrite(conn, encodeChunk(data));
+    } else {
+      await soWrite(conn, data);
+    }
   }
 }

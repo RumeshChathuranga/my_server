@@ -1,28 +1,29 @@
-// Represents a parsed HTTP request header
+// Parsed HTTP request (headers only — body is read separately)
 export type HTTPReq = {
-  method: string;      // GET, POST, etc.
-  uri: Buffer;         // the URL path, e.g. /hello
-  version: string;     // 1.0 or 1.1
-  headers: Buffer[];   // list of raw header lines
+  method:  string;    // e.g. "GET", "POST", "HEAD"
+  uri:     Buffer;    // raw request URI, e.g. "/index.html"
+  version: string;    // "1.0" or "1.1"
+  headers: Buffer[];  // raw header lines, e.g. "Content-Type: text/plain"
 };
 
-// Represents an HTTP response
+// HTTP response to be written to the socket
 export type HTTPRes = {
-  code: number;         // status code, e.g. 200, 404
-  headers: Buffer[];    // list of raw header lines to send
-  body: BodyReader;     // the response body (may be large!)
+  code:    number;    // status code, e.g. 200, 404, 206
+  headers: Buffer[];  // header lines to include in the response
+  body:    BodyReader;
 };
 
-// Interface for reading a response body (could be file, memory, generator)
+// Abstraction over a response body (memory buffer, file, or generator)
 export type BodyReader = {
-  length: number;                        // -1 if unknown (chunked)
-  read: () => Promise<Buffer>;           // returns empty Buffer at EOF
-  close?: () => Promise<void>;           // optional cleanup (e.g. close file)
+  length: number;                  // byte count, or -1 for chunked/unknown
+  read:   () => Promise<Buffer>;   // returns empty Buffer at EOF
+  close?: () => Promise<void>;     // optional cleanup (e.g. close file handle)
 };
 
-// Custom error to send HTTP error responses
+// Throw this to send an HTTP error response back to the client
 export class HTTPError extends Error {
-  constructor(public code: number, message: string) {
+  constructor(public readonly code: number, message: string) {
     super(message);
+    this.name = "HTTPError";
   }
 }
