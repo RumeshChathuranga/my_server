@@ -43,7 +43,9 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
     return {
       code: 200,
       headers: [Buffer.from("Content-Type: text/plain")],
-      body: readerFromMemory(Buffer.from("Hello from my custom HTTP server!\r\n")),
+      body: readerFromMemory(
+        Buffer.from("Hello from my custom HTTP server!\r\n"),
+      ),
     };
   }
 
@@ -62,6 +64,16 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
       body: readerFromMemory(payload),
     };
   }
+  
+  if (req.method === "GET" && uri === "/sheep") {
+    const { readerFromGenerator, sheepGenerator } =
+      await import("../streaming/chunked");
+    return {
+      code: 200,
+      headers: [Buffer.from("Content-Type: text/plain")],
+      body: readerFromGenerator(sheepGenerator()),
+    };
+  }
 
   return errorResponse(404, "Not Found");
 }
@@ -69,7 +81,11 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
 // ---------------------------------------------------------------
 // Read the request body from the socket using Content-Length
 // ---------------------------------------------------------------
-function makeBodyReader(conn: TCPConn, buf: DynBuf, contentLength: number): BodyReader {
+function makeBodyReader(
+  conn: TCPConn,
+  buf: DynBuf,
+  contentLength: number,
+): BodyReader {
   let remaining = contentLength;
 
   return {
@@ -194,7 +210,9 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
 // Start the server
 // ---------------------------------------------------------------
 const server = net.createServer({ pauseOnConnect: true });
-server.on("error", (err: Error) => { throw err; });
+server.on("error", (err: Error) => {
+  throw err;
+});
 
 server.on("connection", async (socket: net.Socket) => {
   try {
