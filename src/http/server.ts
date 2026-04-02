@@ -75,6 +75,12 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
     };
   }
 
+  if (req.method === "GET" && uri.startsWith("/files/")) {
+    const { serveFile } = await import("../files/file_server");
+    const filePath = uri.slice("/files/".length);
+    return serveFile(req, filePath);
+  }
+
   return errorResponse(404, "Not Found");
 }
 
