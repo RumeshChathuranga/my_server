@@ -81,10 +81,16 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
   //   return serveFile(req, filePath);
   // }
 
+  // if (req.method === "GET" && uri.startsWith("/files/")) {
+  //   const { serveFileWithRange } = await import("../range/range");
+  //   const filePath = uri.slice("/files/".length);
+  //   return serveFileWithRange(req, filePath);
+  // }
+
   if (req.method === "GET" && uri.startsWith("/files/")) {
-    const { serveFileWithRange } = await import("../range/range");
+    const { serveFileWithCache } = await import("../cache/cache");
     const filePath = uri.slice("/files/".length);
-    return serveFileWithRange(req, filePath);
+    return serveFileWithCache(req, filePath);
   }
 
   return errorResponse(404, "Not Found");
