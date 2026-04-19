@@ -64,7 +64,7 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
       body: readerFromMemory(payload),
     };
   }
-  
+
   if (req.method === "GET" && uri === "/sheep") {
     const { readerFromGenerator, sheepGenerator } =
       await import("../streaming/chunked");
@@ -75,10 +75,16 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
     };
   }
 
+  // if (req.method === "GET" && uri.startsWith("/files/")) {
+  //   const { serveFile } = await import("../files/file_server");
+  //   const filePath = uri.slice("/files/".length);
+  //   return serveFile(req, filePath);
+  // }
+
   if (req.method === "GET" && uri.startsWith("/files/")) {
-    const { serveFile } = await import("../files/file_server");
+    const { serveFileWithRange } = await import("../range/range");
     const filePath = uri.slice("/files/".length);
-    return serveFile(req, filePath);
+    return serveFileWithRange(req, filePath);
   }
 
   return errorResponse(404, "Not Found");
