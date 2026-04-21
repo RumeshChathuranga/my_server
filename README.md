@@ -83,6 +83,22 @@ npm run build
 
 The test script starts the server on an available local port, validates key routes/behaviors, and shuts the server down automatically.
 
+## Functionality Checks
+
+Use these manual commands to verify server functionality while it is running on `127.0.0.1:1234`.
+
+| What to test                | Command                                                                                                                                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Basic GET                   | `curl -v http://127.0.0.1:1234/`                                                                                                                                                                                                                                    |
+| POST echo                   | `curl -X POST --data "test" http://127.0.0.1:1234/echo`                                                                                                                                                                                                             |
+| Static file                 | `curl http://127.0.0.1:1234/files/index.html`                                                                                                                                                                                                                       |
+| Chunked stream              | `curl -N http://127.0.0.1:1234/sheep`                                                                                                                                                                                                                               |
+| Range request               | `curl -H "Range: bytes=0-4" http://127.0.0.1:1234/files/hello.html`                                                                                                                                                                                                 |
+| Gzip                        | `curl --compressed -v http://127.0.0.1:1234/files/hello.html`                                                                                                                                                                                                       |
+| 304 cache                   | `LM="$(curl -s -D - -o /dev/null http://127.0.0.1:1234/files/hello.html \| awk -F': ' '/^Last-Modified:/{print $2}' \| tr -d '\r')"; echo "LM=[$LM]"; curl -o /dev/null -s -w "%{http_code}\\n" -H "If-Modified-Since: $LM" http://127.0.0.1:1234/files/hello.html` |
+| Health                      | `curl http://127.0.0.1:1234/health`                                                                                                                                                                                                                                 |
+| WebSocket (browser console) | `const ws = new WebSocket("ws://127.0.0.1:1234/"); ws.onmessage = e => console.log(e.data); ws.onopen = () => ws.send("hi");`                                                                                                                                       |
+
 ## Notes
 
 - This is an educational/learning-oriented server implementation focused on protocol understanding and clean architecture boundaries.

@@ -1,12 +1,21 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Server</title>
-</head>
-<body>
-  <h1>Hello from index.html</h1>
-  <p>This is the root page served by /.</p>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Server</title>
+  </head>
+  <body>
+    <h1>Hello from index.html</h1>
+    <p>This is the root page served by /.</p>
+    <script>
+      const ws = new WebSocket("ws://127.0.0.1:1234/ws");
+      ws.onopen = () => {
+        console.log("Connected!");
+        ws.send("Hello WebSocket!");
+      };
+      ws.onmessage = (e) => console.log("Server says:", e.data);
+      ws.onerror = (e) => console.error("Error:", e);
+    </script>
+  </body>
 </html>
