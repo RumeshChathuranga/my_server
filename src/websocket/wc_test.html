@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const ws = new WebSocket("ws://127.0.0.1:1234/ws");
+ws.onopen = () => {
+    console.log("Connected!");
+    ws.send("Hello WebSocket!");
+};
+ws.onmessage = (e) => console.log("Server says:", e.data);
+ws.onerror = (e) => console.error("Error:", e);
+</script>
+</body>
+</html>

@@ -191,6 +191,16 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
 
     const reqBody = makeBodyReader(conn, buf, contentLength);
 
+    // WebSocket upgrade
+    const { isWebSocketUpgrade, wsHandshake, wsServeConnection } =
+      await import("../websocket/ws_server");
+
+    if (isWebSocketUpgrade(req)) {
+      await wsHandshake(conn, req);
+      await wsServeConnection(conn);
+      return; // WebSocket takes over the connection
+    }
+
     // --- Handle the request ---
     let res: HTTPRes;
     try {
