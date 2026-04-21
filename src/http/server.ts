@@ -75,20 +75,11 @@ async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
     };
   }
 
-  // if (req.method === "GET" && uri.startsWith("/files/")) {
-  //   const { serveFile } = await import("../files/file_server");
-  //   const filePath = uri.slice("/files/".length);
-  //   return serveFile(req, filePath);
-  // }
-
-  // if (req.method === "GET" && uri.startsWith("/files/")) {
-  //   const { serveFileWithRange } = await import("../range/range");
-  //   const filePath = uri.slice("/files/".length);
-  //   return serveFileWithRange(req, filePath);
-  // }
 
   if (req.method === "GET" && uri.startsWith("/files/")) {
     const { serveFileWithCache } = await import("../cache/cache");
+    const { serveFile } = await import("../files/file_server");
+    const { serveFileWithRange } = await import("../range/range");
     const filePath = uri.slice("/files/".length);
     return serveFileWithCache(req, filePath);
   }
