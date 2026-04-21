@@ -251,21 +251,23 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
 // ---------------------------------------------------------------
 // Start the server
 // ---------------------------------------------------------------
-const server = net.createServer({ pauseOnConnect: true });
-server.on("error", (err: Error) => {
-  throw err;
-});
+if (require.main === module) {
+  const server = net.createServer({ pauseOnConnect: true });
+  server.on("error", (err: Error) => {
+    throw err;
+  });
 
-server.on("connection", async (socket: net.Socket) => {
-  try {
-    await serveHTTP(socket);
-  } catch (err) {
-    console.error("Fatal connection error:", err);
-  } finally {
-    socket.destroy();
-  }
-});
+  server.on("connection", async (socket: net.Socket) => {
+    try {
+      await serveHTTP(socket);
+    } catch (err) {
+      console.error("Fatal connection error:", err);
+    } finally {
+      socket.destroy();
+    }
+  });
 
-server.listen({ host: "127.0.0.1", port: 1234 }, () => {
-  console.log("HTTP Server on http://127.0.0.1:1234");
-});
+  server.listen({ host: "127.0.0.1", port: 1234 }, () => {
+    console.log("HTTP Server on http://127.0.0.1:1234");
+  });
+}
