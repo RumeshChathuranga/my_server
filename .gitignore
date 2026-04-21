@@ -45,6 +45,3 @@ coverage/
 tmp/
 temp/
 
-#docs
-claude_code_webserver_guide.md
-guide.md
