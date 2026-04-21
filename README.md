@@ -1,10 +1,10 @@
-# my_server
+# My_Server
 
 A low-level HTTP/1.1 and WebSocket server built with Node.js + TypeScript, implemented directly on top of raw TCP sockets (`net`) instead of Express or other frameworks.
 
 This project is a hands-on systems-style implementation that demonstrates request parsing, response writing, keep-alive handling, streaming, range requests, basic caching, gzip support, and WebSocket frame processing.
 
-## Server Workflow
+## Implementation Workflow
 
 <img src="docs/images/my-server-workflow.png" alt="My Server Workflow" width="760" />
 
