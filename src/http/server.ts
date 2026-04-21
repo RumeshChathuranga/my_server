@@ -195,6 +195,20 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
     let res: HTTPRes;
     try {
       res = await handleRequest(req, reqBody);
+      const { clientAcceptsGzip, gzipBody } =
+        await import("../compression/compress");
+      if (
+        clientAcceptsGzip(req) &&
+        res.code !== 304 &&
+        res.code !== 101 &&
+        res.body.length !== 0
+      ) {
+        res = {
+          ...res,
+          headers: [...res.headers, Buffer.from("Content-Encoding: gzip")],
+          body: gzipBody(res.body),
+        };
+      }
     } catch (err) {
       if (err instanceof HTTPError) {
         res = errorResponse(err.code, err.message);
