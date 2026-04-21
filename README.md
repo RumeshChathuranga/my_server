@@ -4,6 +4,10 @@ A low-level HTTP/1.1 and WebSocket server built with Node.js + TypeScript, imple
 
 This project is a hands-on systems-style implementation that demonstrates request parsing, response writing, keep-alive handling, streaming, range requests, basic caching, gzip support, and WebSocket frame processing.
 
+## Server Workflow
+
+<img src="docs/images/my-server-workflow.png" alt="My Server Workflow" width="760" />
+
 ## Features
 
 - HTTP/1.0 and HTTP/1.1 request parsing with explicit header/body handling
