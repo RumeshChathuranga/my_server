@@ -103,6 +103,28 @@ Use these manual commands to verify server functionality while it is running on 
 | Health                      | `curl http://127.0.0.1:1234/health`                                                                                                                                                                                                                                 |
 | WebSocket (browser console) | `const ws = new WebSocket("ws://127.0.0.1:1234/"); ws.onmessage = e => console.log(e.data); ws.onopen = () => ws.send("hi");`                                                                                                                                       |
 
+## Docker Setup
+
+The application is containerized using a multi-stage Docker build to ensure a small, secure production image.
+
+**Build the image locally:**
+```bash
+docker build -t my_server .
+```
+
+**Run the container locally:**
+```bash
+docker run -p 3000:3000 my_server
+```
+
+## CI/CD Pipeline
+
+This project uses **GitHub Actions** for Continuous Integration. The workflow automatically triggers on pushes and pull requests to the `main` branch. It ensures code quality by:
+1. Installing dependencies.
+2. Building the TypeScript project.
+3. Running integration tests via `test.sh`.
+4. Verifying the Docker image build.
+
 ## Notes
 
 - This is an educational/learning-oriented server implementation focused on protocol understanding and clean architecture boundaries.
