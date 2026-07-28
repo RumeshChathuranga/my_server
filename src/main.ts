@@ -15,6 +15,17 @@ import { readerFromGenerator, sheepGenerator } from "./streaming/chunked";
 const HOST = process.env.HOST ?? "0.0.0.0";
 const PORT = Number(process.env.PORT ?? "1234");
 
+const IDLE_TIMEOUT_MS = 30_000;   // no activity at all on the socket
+const HEADER_TIMEOUT_MS = 10_000; // must finish sending headers within this window
+
+const TIMED_OUT = Symbol("header-timeout");
+
+function timeoutAt(deadline: number): Promise<typeof TIMED_OUT> {
+  return new Promise((resolve) =>
+    setTimeout(() => resolve(TIMED_OUT), Math.max(0, deadline - Date.now())),
+  );
+}
+
 // ---------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------
@@ -122,9 +133,17 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
   while (true) {
     // Parse request header
     let req: HTTPReq | null = null;
+    const headerDeadline = Date.now() + HEADER_TIMEOUT_MS;
 
     while (!req) {
-      const data = await soRead(conn);
+      const result = await Promise.race([soRead(conn), timeoutAt(headerDeadline)]);
+
+      if (result === TIMED_OUT) {
+        socket.destroy();
+        return;
+      }
+
+      const data = result;
 
       if (data.length === 0) {
         if (buf.length > 0) {
@@ -229,6 +248,9 @@ server.on("error", (err: Error) => {
 });
 
 server.on("connection", async (socket: net.Socket) => {
+  socket.setTimeout(IDLE_TIMEOUT_MS);
+  socket.on("timeout", () => socket.destroy());
+
   try {
     await serveHTTP(socket);
   } catch (err) {

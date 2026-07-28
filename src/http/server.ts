@@ -23,6 +23,17 @@ export function emptyBody(): BodyReader {
   return readerFromMemory(Buffer.from(""));
 }
 
+const IDLE_TIMEOUT_MS = 30_000;   // no activity at all on the socket
+const HEADER_TIMEOUT_MS = 10_000; // must finish sending headers within this window
+
+const TIMED_OUT = Symbol("header-timeout");
+
+function timeoutAt(deadline: number): Promise<typeof TIMED_OUT> {
+  return new Promise((resolve) =>
+    setTimeout(() => resolve(TIMED_OUT), Math.max(0, deadline - Date.now())),
+  );
+}
+
 // Build a simple text/HTML error response
 function errorResponse(code: number, message: string): HTTPRes {
   const body = Buffer.from(`<h1>${code} — ${message}</h1>`);
@@ -148,9 +159,17 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
   while (true) {
     // --- Parse HTTP header ---
     let req: HTTPReq | null = null;
+    const headerDeadline = Date.now() + HEADER_TIMEOUT_MS;
 
     while (!req) {
-      const data = await soRead(conn);
+      const result = await Promise.race([soRead(conn), timeoutAt(headerDeadline)]);
+
+      if (result === TIMED_OUT) {
+        socket.destroy();
+        return;
+      }
+
+      const data = result;
 
       if (data.length === 0) {
         // Client closed connection — clean exit
@@ -250,6 +269,9 @@ if (require.main === module) {
   });
 
   server.on("connection", async (socket: net.Socket) => {
+    socket.setTimeout(IDLE_TIMEOUT_MS);
+    socket.on("timeout", () => socket.destroy());
+
     try {
       await serveHTTP(socket);
     } catch (err) {
