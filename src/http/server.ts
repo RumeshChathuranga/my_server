@@ -202,6 +202,7 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
         clientAcceptsGzip(req) &&
         res.code !== 304 &&
         res.code !== 101 &&
+        res.code !== 206 &&
         res.body.length !== 0
       ) {
         res = {
