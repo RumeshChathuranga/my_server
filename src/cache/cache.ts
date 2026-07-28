@@ -114,7 +114,7 @@ function notFound(): HTTPRes {
   };
 }
 
-function parseRange(header: string, size: number): [number, number] | null {
+export function parseRange(header: string, size: number): [number, number] | null {
   const m = header.match(/^bytes=(\d*)-(\d*)$/);
   if (!m) return null;
 
