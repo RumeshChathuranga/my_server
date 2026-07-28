@@ -12,7 +12,7 @@ import { clientAcceptsGzip, gzipBody } from "./compression/compress";
 import { isWebSocketUpgrade, wsHandshake, wsServeConnection } from "./websocket/ws_server";
 import { readerFromGenerator, sheepGenerator } from "./streaming/chunked";
 
-const HOST = "127.0.0.1";
+const HOST = process.env.HOST ?? "0.0.0.0";
 const PORT = Number(process.env.PORT ?? "1234");
 
 // ---------------------------------------------------------------

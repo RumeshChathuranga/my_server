@@ -10,9 +10,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
+COPY public ./public
 
-# Assuming the app runs on a port, though package.json doesn't specify one. Defaulting to 3000.
-# If your app runs on a different port, change this.
+ENV PORT=3000
 EXPOSE 3000
 
 CMD ["npm", "start"]
