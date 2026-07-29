@@ -44,3 +44,5 @@ coverage/
 tmp/
 temp/
 
+#interview folder
+/interview/*
