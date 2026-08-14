@@ -30,7 +30,7 @@ function timeoutAt(deadline: number): Promise<typeof TIMED_OUT> {
 // Route handler
 // ---------------------------------------------------------------
 async function handleRequest(req: HTTPReq, body: BodyReader): Promise<HTTPRes> {
-  const uri = req.uri.toString();
+  const uri = req.uri.toString().split("?")[0];
 
   // --- Root: serve index.html ---
   if (uri === "/" || uri === "/index.html") {
@@ -173,6 +173,7 @@ async function serveHTTP(socket: net.Socket): Promise<void> {
 
     // WebSocket upgrade intercept
     if (isWebSocketUpgrade(req)) {
+      socket.setTimeout(0); // idle HTTP timeout does not apply once upgraded
       await wsHandshake(conn, req);
       await wsServeConnection(conn);
       return;

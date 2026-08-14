@@ -51,6 +51,20 @@ assert_eq() {
   fi
 }
 
+# Fetches a URL's response headers into a temp file and prints one header's value.
+# Writing to a file (rather than piping into an awk that exits after its first
+# match) avoids curl seeing a closed pipe and failing with a write error.
+header_value() {
+  local url="$1"
+  local name="$2"
+  shift 2
+  local header_file
+  header_file="$(mktemp)"
+  curl -s -D "$header_file" -o /dev/null "$@" "$url"
+  awk -v IGNORECASE=1 -v pat="^${name}:" '$0 ~ pat { gsub("\r", ""); print; exit }' "$header_file"
+  rm -f "$header_file"
+}
+
 cleanup() {
   if [ "$ROOT_FIXTURE_CREATED" -eq 1 ]; then
     rm -f "$ROOT_FIXTURE"
@@ -112,13 +126,8 @@ assert_eq "$STATIC_BODY" "Test file content" "GET /files/test.txt returns file c
 
 echo ""
 echo "=== Test 4: Gzip compression ==="
-GZIP_ENCODING=$(curl -s -D - -o /tmp/my_server_gzip_body.txt -H "Accept-Encoding: gzip" "$BASE/" \
-  | awk 'BEGIN{IGNORECASE=1} /^Content-Encoding:/ {gsub("\r","",$0); print $2; exit}')
-if [ "$GZIP_ENCODING" = "gzip" ]; then
-  pass "Server advertises gzip when requested"
-else
-  fail "Server advertises gzip when requested"
-fi
+GZIP_HEADER=$(header_value "$BASE/" "Content-Encoding" -H "Accept-Encoding: gzip")
+assert_eq "$GZIP_HEADER" "Content-Encoding: gzip" "Server advertises gzip when requested"
 
 echo ""
 echo "=== Test 5: Range request ==="
@@ -126,8 +135,7 @@ RANGE_CODE=$(curl -s -o /tmp/my_server_range_body.txt -w "%{http_code}" -H "Rang
 assert_eq "$RANGE_CODE" "206" "Range request returns 206"
 RANGE_BODY=$(< /tmp/my_server_range_body.txt)
 assert_eq "$RANGE_BODY" "Test" "Range request returns expected bytes"
-RANGE_HEADER=$(curl -s -D - -o /dev/null -H "Range: bytes=0-3" "$BASE/files/test.txt" \
-  | awk 'BEGIN{IGNORECASE=1} /^Content-Range:/ {gsub("\r","",$0); print $0; exit}')
+RANGE_HEADER=$(header_value "$BASE/files/test.txt" "Content-Range" -H "Range: bytes=0-3")
 assert_eq "$RANGE_HEADER" "Content-Range: bytes 0-3/17" "Range response includes Content-Range"
 
 echo ""
@@ -141,6 +149,16 @@ echo ""
 echo "=== Test 7: 404 ==="
 NOT_FOUND_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/nonexistent")
 assert_eq "$NOT_FOUND_CODE" "404" "Unknown route returns 404"
+
+echo ""
+echo "=== Test 8: Content-Type on static files ==="
+CONTENT_TYPE=$(header_value "$BASE/files/test.txt" "Content-Type")
+assert_eq "$CONTENT_TYPE" "Content-Type: text/plain" "Static file response includes Content-Type"
+
+echo ""
+echo "=== Test 9: Query string on root route ==="
+QUERY_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/?v=1")
+assert_eq "$QUERY_CODE" "200" "GET /?v=1 returns 200, not 404"
 
 echo ""
 echo "✅ All tests complete."

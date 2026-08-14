@@ -42,20 +42,23 @@ function resp404(): HTTPRes {
 }
 
 // Guess Content-Type from file extension
-function mimeType(filePath: string): string {
+export function mimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   const types: Record<string, string> = {
-    ".html": "text/html",
-    ".css":  "text/css",
-    ".js":   "application/javascript",
-    ".json": "application/json",
-    ".txt":  "text/plain",
-    ".bin":  "application/octet-stream",
-    ".png":  "image/png",
-    ".jpg":  "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".svg":  "image/svg+xml",
-    ".ico":  "image/x-icon",
+    ".html":  "text/html",
+    ".css":   "text/css",
+    ".js":    "application/javascript",
+    ".json":  "application/json",
+    ".txt":   "text/plain",
+    ".bin":   "application/octet-stream",
+    ".png":   "image/png",
+    ".jpg":   "image/jpeg",
+    ".jpeg":  "image/jpeg",
+    ".svg":   "image/svg+xml",
+    ".ico":   "image/x-icon",
+    ".woff2": "font/woff2",
+    ".webp":  "image/webp",
+    ".map":   "application/json",
   };
   return types[ext] ?? "application/octet-stream";
 }

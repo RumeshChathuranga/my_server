@@ -1,0 +1,41 @@
+services:
+  # Production: the compiled server, running the same multi-stage image
+  # described in the README's Docker Setup section. Serves both the demo
+  # frontend (public/index.html, at /) and the backend API/WS routes.
+  app:
+    build:
+      context: .
+      target: production
+    image: my_server:latest
+    ports:
+      - "${PORT:-1234}:1234"
+    environment:
+      PORT: 1234
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1234/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Dev: runs src/main.ts directly through tsx's watch mode, no build step.
+  # src/ and public/ are bind-mounted so host edits restart the server live.
+  # Opt-in only: `docker compose up dev` (profiled services always start when
+  # named explicitly, even without --profile).
+  dev:
+    build:
+      context: .
+      target: builder
+    command: npx tsx watch src/main.ts
+    ports:
+      - "${DEV_PORT:-1235}:1234"
+    environment:
+      PORT: 1234
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - /app/node_modules
+    profiles:
+      - dev

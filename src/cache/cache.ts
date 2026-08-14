@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { HTTPReq, HTTPRes } from "../shared/http_types";
 import { fieldGet } from "../http/parser";
+import { mimeType } from "../files/file_server";
 
 const PUBLIC_DIR = path.resolve(process.cwd(), "public");
 const READ_CHUNK = 64 * 1024;
@@ -28,6 +29,7 @@ export async function serveFileWithCache(
     const fileSize = stat.size;
 
     const commonHeaders = [
+      Buffer.from(`Content-Type: ${mimeType(safePath)}`),
       Buffer.from(`Last-Modified: ${lastModified}`),
       Buffer.from("Accept-Ranges: bytes"),
     ];

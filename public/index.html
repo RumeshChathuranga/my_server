@@ -1,21 +1,1213 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Server</title>
-  </head>
-  <body>
-    <h1>Hello from index.html</h1>
-    <p>This is the root page served by /.</p>
-    <script>
-      const ws = new WebSocket("ws://127.0.0.1:1234/ws");
-      ws.onopen = () => {
-        console.log("Connected!");
-        ws.send("Hello WebSocket!");
-      };
-      ws.onmessage = (e) => console.log("Server says:", e.data);
-      ws.onerror = (e) => console.error("Error:", e);
-    </script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>my_server</title>
+<meta name="description" content="A raw-TCP HTTP/1.1 and WebSocket server, demonstrated live: chunked streaming, conditional caching, byte ranges, and frame-level WebSocket echo." />
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: light;
+    --field: #EDF3F9;
+    --panel: #FFFFFF;
+    --panel-soft: #F5F9FC;
+    --ink: #0B2030;
+    --ink-soft: #5A7183;
+    --ink-faint: #8CA3B5;
+    --rule: #CBDDEC;
+    --rule-soft: #DCE9F3;
+    --signal: #1668C7;
+    --signal-soft: #E4EEF9;
+    --amber: #B0761C;
+    --amber-soft: #F7EDDC;
+    --red: #C0392F;
+    --red-soft: #FBE9E7;
+    --wire: #0C2437;
+    --wire-line: #16324A;
+    --wire-text: #CFE3F2;
+    --wire-head: #7FB6EE;
+    --wire-dim: #4E7695;
+    --wire-crlf: #3C6E96;
+
+    --font-display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+    --space-8: 72px;
+
+    --radius: 3px;
+    --header-h: 60px;
+    --wire-w: 420px;
+  }
+
+  /*
+    This page commits to one palette regardless of OS theme: the whole point of the
+    design is the contrast between a light, calm page and the single dark "wire" panel.
+    A dark-mode variant would flatten that contrast away, so there isn't one.
+  */
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--field);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 { margin: 0; font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; }
+  p { margin: 0; }
+  button { font-family: var(--font-mono); }
+  ::selection { background: var(--signal); color: #fff; }
+
+  a.textlink { color: var(--signal); text-decoration-color: var(--rule); text-underline-offset: 3px; }
+  a.textlink:hover { text-decoration-color: var(--signal); }
+
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ---------- Header ---------- */
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: var(--header-h);
+    background: color-mix(in srgb, var(--field) 88%, transparent);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .topbar-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    height: 100%;
+    padding: 0 var(--space-6);
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .brand {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+  }
+
+  .brand-meta {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+    display: none;
+  }
+
+  .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink-faint);
+    flex: none;
+  }
+
+  .status-dot.is-live { background: var(--signal); }
+  .status-dot.is-wait { background: var(--amber); }
+  .status-dot.is-down { background: var(--red); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .status-dot.is-live { animation: pulse 2.4s ease-in-out infinite; }
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 35%, transparent); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 0%, transparent); }
+  }
+
+  @media (min-width: 620px) { .brand-meta { display: inline; } }
+
+  /* ---------- Layout ---------- */
+
+  .layout {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 var(--space-6) var(--space-8);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-6);
+  }
+
+  .stations {
+    flex: 1 1 620px;
+    min-width: 0;
+  }
+
+  .wire {
+    flex: 0 0 var(--wire-w);
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-5));
+    height: calc(100vh - var(--header-h) - var(--space-6));
+    display: flex;
+    flex-direction: column;
+    background: var(--wire);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--wire-line);
+  }
+
+  .wire-head {
+    flex: none;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--wire-line);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--wire-text);
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .wire-sub {
+    font-weight: 400;
+    color: var(--wire-dim);
+  }
+
+  .wire-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .wire-empty {
+    color: var(--wire-dim);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    padding: var(--space-2);
+  }
+
+  /* ---------- Wire entries ---------- */
+
+  .wire-entry {
+    border: 1px solid var(--wire-line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .wire-entry { animation: entry-in 0.22s ease-out; }
+  }
+  @keyframes entry-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .wire-entry-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--wire-line);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+
+  .wire-method { color: var(--wire-head); font-weight: 600; }
+  .wire-path { color: var(--wire-text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wire-time { color: var(--wire-dim); }
+
+  .wire-block {
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--wire-text);
+  }
+
+  .wire-block.is-resp { border-top: 1px dashed var(--wire-line); }
+  .wire-block .status-2xx { color: var(--wire-head); }
+  .wire-block .status-3xx { color: #E3B65C; }
+  .wire-block .status-4xx, .wire-block .status-5xx { color: #E68078; }
+  .wire-line-name { color: var(--wire-head); }
+  .wire-crlf { color: var(--wire-crlf); }
+  .wire-note { color: var(--wire-dim); font-style: italic; }
+  .wire-body-line { color: var(--wire-text); }
+
+  .wire-ws-out .wire-entry-head { background: color-mix(in srgb, var(--wire-line) 70%, var(--signal) 12%); }
+  .wire-arrow { font-weight: 600; }
+
+  /* ---------- Stations shell ---------- */
+
+  .hero {
+    padding: var(--space-8) 0 var(--space-7);
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 1.5rem + 2.2vw, 3.25rem);
+    line-height: 1.08;
+    max-width: 16ch;
+  }
+
+  .hero-prose {
+    margin-top: var(--space-4);
+    max-width: 52ch;
+    color: var(--ink-soft);
+    font-size: 1.0625rem;
+  }
+
+  .hero-prose code {
+    font-family: var(--font-mono);
+    background: var(--panel-soft);
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    padding: 0 4px;
+    font-size: 0.9em;
+    color: var(--ink);
+  }
+
+  .station {
+    padding: var(--space-7) 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .station-id {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .station-method { color: var(--signal); }
+  .station-plus { color: var(--ink-faint); font-weight: 400; padding: 0 2px; }
+
+  .station-prose {
+    margin-top: var(--space-3);
+    max-width: 58ch;
+    color: var(--ink-soft);
+  }
+
+  .station-prose + .station-prose { margin-top: var(--space-2); }
+
+  .station-body {
+    margin-top: var(--space-5);
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .field-label {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+  }
+
+  .btn {
+    appearance: none;
+    border: 1px solid var(--signal);
+    background: var(--signal);
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .btn:hover { background: color-mix(in srgb, var(--signal) 86%, black); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn.is-secondary {
+    background: transparent;
+    color: var(--signal);
+  }
+  .btn.is-secondary:hover { background: var(--signal-soft); }
+
+  textarea, input[type="text"], input[type="number"] {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+  }
+
+  textarea { width: 100%; resize: vertical; min-height: 72px; }
+
+  input[type="number"] { width: 5.5rem; }
+
+  .meta-line {
+    margin-top: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+    min-height: 1.2em;
+  }
+
+  .meta-line strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- Sheep stream ---------- */
+
+  .sheep-log {
+    margin-top: var(--space-4);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .sheep-row { display: flex; gap: var(--space-3); color: var(--ink-soft); }
+  .sheep-row .sheep-body { color: var(--ink); }
+  .sheep-row .sheep-t { color: var(--ink-faint); margin-left: auto; }
+
+  /* ---------- Caching steps ---------- */
+
+  .step-row { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+  .step {
+    flex: 1 1 220px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: var(--space-4);
+    background: var(--panel);
+  }
+  .step-num {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .step h3 { font-family: var(--font-mono); font-size: 0.9375rem; font-weight: 600; margin-top: var(--space-1); }
+  .step .btn { margin-top: var(--space-3); width: 100%; }
+  .step-result { margin-top: var(--space-3); font-family: var(--font-mono); font-size: 0.8125rem; color: var(--ink-soft); }
+
+  /* ---------- Range visual ---------- */
+
+  .byte-strip {
+    display: flex;
+    gap: 2px;
+    margin-top: var(--space-4);
+    flex-wrap: wrap;
+  }
+  .byte-cell {
+    width: 26px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    background: var(--panel-soft);
+    border: 1px solid var(--rule-soft);
+    color: var(--ink-faint);
+    border-radius: 2px;
+  }
+  .byte-cell.in-range {
+    background: var(--signal-soft);
+    border-color: var(--signal);
+    color: var(--signal);
+    font-weight: 600;
+  }
+
+  .range-controls { margin-top: var(--space-4); }
+  .range-note { margin-top: var(--space-4); font-size: 0.875rem; color: var(--ink-faint); }
+
+  /* ---------- WebSocket ---------- */
+
+  .ws-status {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .ws-input-row { margin-top: var(--space-4); }
+  .ws-input-row input[type="text"] { width: min(100%, 340px); }
+
+  /* ---------- Facts / pipeline ---------- */
+
+  .pipeline {
+    margin-top: var(--space-5);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  .pipe-box {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: var(--space-2) var(--space-3);
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .pipe-arrow { color: var(--ink-faint); }
+
+  .facts {
+    margin-top: var(--space-6);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-4);
+  }
+  .fact dt {
+    font-family: var(--font-mono);
+    font-size: 1.375rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .fact dd {
+    margin: var(--space-1) 0 0;
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--rule);
+    padding: var(--space-6) 0 var(--space-8);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink-faint);
+  }
+
+  /* ---------- Mobile: wire panel becomes a bottom dock ---------- */
+
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; padding-bottom: 0; }
+    .stations { padding-bottom: 40vh; width: 100%; }
+    .wire {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: 36vh;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      z-index: 25;
+      box-shadow: 0 -8px 20px rgba(7, 20, 30, 0.25);
+    }
+  }
+
+  @media (max-width: 560px) {
+    .topbar-inner, .layout { padding-left: var(--space-4); padding-right: var(--space-4); }
+    .byte-cell { width: 22px; height: 28px; font-size: 0.75rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">my_server</span>
+    <span class="brand-meta">HTTP/1.1 · WebSocket · raw TCP sockets</span>
+    <span class="status">
+      <span class="status-dot is-wait" id="statusDot"></span>
+      <span id="statusText">connecting…</span>
+    </span>
+  </div>
+</header>
+
+<div class="layout">
+  <main class="stations">
+
+    <section class="hero">
+      <h1>Every byte on this page came off a raw TCP socket.</h1>
+      <p class="hero-prose">
+        No Express, no <code>http</code> module. This page is served by a hand-written HTTP/1.1
+        parser, and every control below talks to it live — watch the wire panel on the right
+        fill in as you go.
+      </p>
+    </section>
+
+    <section class="station" data-station="root">
+      <div class="station-id">
+        <span class="station-method">GET</span> / <span class="station-plus">+</span>
+        <span class="station-method">POST</span> /echo
+      </div>
+      <p class="station-prose">
+        The root route serves this page through the same cache-aware file handler used for
+        every static file below. <code>/echo</code> reads the request body back byte for byte —
+        nothing is parsed or transformed.
+      </p>
+      <div class="station-body">
+        <div class="row">
+          <button class="btn is-secondary" id="btnGetRoot" type="button">Send GET /</button>
+        </div>
+        <div class="row" style="margin-top: var(--space-4); align-items: flex-start;">
+          <textarea id="echoInput" aria-label="Body to send to /echo">Hello from the client — sent as the exact POST body.</textarea>
+        </div>
+        <div class="row" style="margin-top: var(--space-3);">
+          <button class="btn" id="btnPostEcho" type="button">Send POST /echo</button>
+        </div>
+        <p class="meta-line" id="echoMeta"></p>
+      </div>
+    </section>
+
+    <section class="station" data-station="sheep">
+      <div class="station-id"><span class="station-method">GET</span> /sheep</div>
+      <p class="station-prose">
+        Ten chunks, 500&nbsp;ms apart, streamed with <code>Transfer-Encoding: chunked</code> from
+        an async generator on the server. No buffering, no <code>Content-Length</code> known up front.
+      </p>
+      <div class="station-body">
+        <button class="btn is-secondary" id="btnSheep" type="button">Start stream</button>
+        <div class="sheep-log" id="sheepLog"></div>
+      </div>
+    </section>
+
+    <section class="station" data-station="cache">
+      <div class="station-id"><span class="station-method">GET</span> /files/hello.html — conditional caching</div>
+      <p class="station-prose">
+        Fetch the file once and capture its <code>Last-Modified</code> timestamp. Fetch it again
+        with that timestamp as <code>If-Modified-Since</code>, and the server sends back a
+        <code>304</code> with an empty body instead of the file.
+      </p>
+      <div class="station-body">
+        <div class="step-row">
+          <div class="step">
+            <div class="step-num">Step 1</div>
+            <h3>Fetch the file</h3>
+            <button class="btn" id="btnCacheFetch" type="button">GET /files/hello.html</button>
+            <div class="step-result" id="cacheFetchResult">Not fetched yet.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">Step 2</div>
+            <h3>Revalidate</h3>
+            <button class="btn is-secondary" id="btnCacheRevalidate" type="button" disabled>Send If-Modified-Since</button>
+            <div class="step-result" id="cacheRevalidateResult">Run step 1 first.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="station" data-station="range">
+      <div class="station-id"><span class="station-method">GET</span> /files/test.txt — byte ranges</div>
+      <p class="station-prose">
+        <code>test.txt</code> is 17 bytes: <code>Test file content</code>. Pick a slice and the
+        server returns just those bytes as <code>206 Partial Content</code>, with a matching
+        <code>Content-Range</code> header.
+      </p>
+      <div class="station-body">
+        <div class="byte-strip" id="byteStrip" aria-hidden="true"></div>
+        <div class="row range-controls">
+          <label class="field-label" for="rangeStart">start</label>
+          <input type="number" id="rangeStart" min="0" max="16" value="5" />
+          <label class="field-label" for="rangeEnd">end</label>
+          <input type="number" id="rangeEnd" min="1" max="17" value="9" />
+          <button class="btn is-secondary" id="btnRange" type="button">Request range</button>
+        </div>
+        <p class="meta-line" id="rangeMeta"></p>
+        <p class="range-note">
+          A malformed or inverted range isn't rejected with <code>416</code> here — it silently
+          falls back to a full <code>200</code> response. Known gap, not hidden.
+        </p>
+      </div>
+    </section>
+
+    <section class="station" data-station="ws">
+      <div class="station-id">WS / — WebSocket echo</div>
+      <p class="station-prose">
+        The handshake is a hand-rolled SHA-1 + magic-string exchange. Every text (and binary)
+        frame you send comes back as a text frame prefixed <code>Echo:</code> — there's no
+        binary echo path.
+      </p>
+      <div class="station-body">
+        <div class="row">
+          <button class="btn is-secondary" id="btnWsConnect" type="button">Connect</button>
+          <span class="ws-status"><span class="status-dot" id="wsDot"></span><span id="wsStatusText">not connected</span></span>
+        </div>
+        <div class="ws-input-row row">
+          <input type="text" id="wsInput" placeholder="Message to send" disabled aria-label="WebSocket message" />
+          <button class="btn" id="btnWsSend" type="button" disabled>Send</button>
+        </div>
+        <p class="meta-line">A silent heartbeat keeps the connection alive in the background — nothing to watch here, it just doesn't drop.</p>
+      </div>
+    </section>
+
+    <section class="station" data-station="notfound">
+      <div class="station-id">Path safety &amp; 404s</div>
+      <p class="station-prose">
+        Every file path is resolved against <code>public/</code> with
+        <code>path.normalize("/" + uriPath)</code> before being checked — that collapses any
+        <code>../</code> segments, so a traversal attempt lands inside the public directory
+        instead of escaping it, and simply 404s.
+      </p>
+      <div class="station-body">
+        <div class="row">
+          <button class="btn is-secondary" id="btnTraversal" type="button">Try /files/../../etc/passwd</button>
+          <button class="btn is-secondary" id="btnMissing" type="button">Try an unknown route</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="station" data-station="build">
+      <div class="station-id">How it's built</div>
+      <p class="station-prose">Every HTTP request runs this pipeline, in order:</p>
+      <div class="pipeline">
+        <span class="pipe-box">Parser</span><span class="pipe-arrow">→</span>
+        <span class="pipe-box">Router</span><span class="pipe-arrow">→</span>
+        <span class="pipe-box">Cache / Range</span><span class="pipe-arrow">→</span>
+        <span class="pipe-box">Gzip</span><span class="pipe-arrow">→</span>
+        <span class="pipe-box">Writer</span>
+      </div>
+      <p class="station-prose" style="margin-top: var(--space-4);">
+        A WebSocket upgrade is detected straight off the parsed headers and hands the socket to
+        the frame loop before the router ever sees it — the two pipelines only share the parser.
+      </p>
+      <dl class="facts">
+        <div class="fact"><dt>0</dt><dd>production dependencies</dd></div>
+        <div class="fact"><dt>~1,700</dt><dd>lines of strict TypeScript</dd></div>
+        <div class="fact"><dt>26 + 9</dt><dd>unit and integration tests</dd></div>
+        <div class="fact"><dt>2</dt><dd>stage Docker build, GitHub Actions CI</dd></div>
+      </dl>
+    </section>
+
+  </main>
+
+  <aside class="wire" aria-live="polite" aria-label="Live HTTP and WebSocket exchange">
+    <div class="wire-head">Wire <span class="wire-sub">— what actually went over the socket</span></div>
+    <div class="wire-log" id="wireLog">
+      <p class="wire-empty">Waiting for the first exchange…</p>
+    </div>
+  </aside>
+</div>
+
+<footer class="page-footer">
+  <div class="layout" style="padding: 0; align-items: baseline;">
+    <span>That's the whole server. No mocks above this line.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var wireLog = document.getElementById("wireLog");
+  var wireEmptyNote = wireLog.querySelector(".wire-empty");
+
+  function scrollWireToEnd() {
+    wireLog.scrollTop = wireLog.scrollHeight;
+  }
+
+  function clearEmptyNote() {
+    if (wireEmptyNote) { wireEmptyNote.remove(); wireEmptyNote = null; }
+  }
+
+  function statusClass(code) {
+    if (code >= 200 && code < 300) return "status-2xx";
+    if (code >= 300 && code < 400) return "status-3xx";
+    return "status-4xx";
+  }
+
+  // Appends a line of text to a wire block, with an optional dim CRLF glyph and a class.
+  function appendLine(container, text, opts) {
+    opts = opts || {};
+    var line = document.createElement("div");
+    if (opts.cls) line.className = opts.cls;
+    var span = document.createElement("span");
+    span.textContent = text;
+    line.appendChild(span);
+    if (opts.crlf !== false) {
+      var crlf = document.createElement("span");
+      crlf.className = "wire-crlf";
+      crlf.textContent = "␍␊";
+      line.appendChild(crlf);
+    }
+    container.appendChild(line);
+  }
+
+  function appendNote(container, text) {
+    var line = document.createElement("div");
+    line.className = "wire-note";
+    line.textContent = text;
+    container.appendChild(line);
+  }
+
+  // Creates a new HTTP-style wire entry and returns handles to fill it in as work proceeds.
+  function beginHttpEntry(method, path) {
+    clearEmptyNote();
+    var entry = document.createElement("div");
+    entry.className = "wire-entry";
+
+    var head = document.createElement("div");
+    head.className = "wire-entry-head";
+    var m = document.createElement("span");
+    m.className = "wire-method";
+    m.textContent = method;
+    var p = document.createElement("span");
+    p.className = "wire-path";
+    p.textContent = path;
+    var t = document.createElement("span");
+    t.className = "wire-time";
+    t.textContent = "…";
+    head.appendChild(m); head.appendChild(p); head.appendChild(t);
+    entry.appendChild(head);
+
+    var reqBlock = document.createElement("div");
+    reqBlock.className = "wire-block";
+    entry.appendChild(reqBlock);
+
+    wireLog.appendChild(entry);
+    scrollWireToEnd();
+
+    return { entry: entry, head: t, reqBlock: reqBlock };
+  }
+
+  function writeRequestBlock(reqBlock, method, path, extraHeaders) {
+    var reqLine = document.createElement("div");
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "wire-line-name";
+    nameSpan.textContent = method + " " + path + " HTTP/1.1";
+    reqLine.appendChild(nameSpan);
+    var crlf = document.createElement("span");
+    crlf.className = "wire-crlf";
+    crlf.textContent = "␍␊";
+    reqLine.appendChild(crlf);
+    reqBlock.appendChild(reqLine);
+
+    (extraHeaders || []).forEach(function (h) { appendLine(reqBlock, h); });
+    appendNote(reqBlock, "+ Host, Accept-Encoding, User-Agent — added by the browser");
+    appendLine(reqBlock, "", { crlf: true });
+  }
+
+  function finishHttpEntry(handles, res, bodyPreview, elapsedMs) {
+    handles.head.textContent = elapsedMs + " ms";
+
+    var respBlock = document.createElement("div");
+    respBlock.className = "wire-block is-resp";
+
+    var statusLine = document.createElement("div");
+    var statusSpan = document.createElement("span");
+    statusSpan.className = statusClass(res.status);
+    statusSpan.textContent = "HTTP/1.1 " + res.status + " " + res.statusText;
+    statusLine.appendChild(statusSpan);
+    var crlf1 = document.createElement("span");
+    crlf1.className = "wire-crlf";
+    crlf1.textContent = "␍␊";
+    statusLine.appendChild(crlf1);
+    respBlock.appendChild(statusLine);
+
+    res.headers.forEach(function (value, key) {
+      appendLine(respBlock, key + ": " + value);
+    });
+    appendLine(respBlock, "", { crlf: true });
+
+    if (bodyPreview) {
+      var bodyLine = document.createElement("div");
+      bodyLine.className = "wire-body-line";
+      bodyLine.textContent = bodyPreview;
+      respBlock.appendChild(bodyLine);
+    }
+
+    appendNote(respBlock, "Fetch strips hop-by-hop headers (Transfer-Encoding, Connection) before your code sees them");
+
+    handles.entry.appendChild(respBlock);
+    scrollWireToEnd();
+  }
+
+  function truncate(text, max) {
+    if (text.length <= max) return text;
+    return text.slice(0, max) + "… (" + text.length + " bytes total)";
+  }
+
+  // Performs a fetch, logging the exchange into the wire panel as it happens.
+  function wireFetch(method, path, options) {
+    options = options || {};
+    var handles = beginHttpEntry(method, path);
+    writeRequestBlock(handles.reqBlock, method, path, options.shownHeaders);
+
+    var start = performance.now();
+    var fetchOptions = { method: method };
+    if (options.headers) fetchOptions.headers = options.headers;
+    if (options.body !== undefined) fetchOptions.body = options.body;
+
+    return fetch(path, fetchOptions).then(function (res) {
+      var elapsed = Math.round(performance.now() - start);
+      return res.text().then(function (text) {
+        var preview = options.showBody === false ? "" : truncate(text, 400);
+        finishHttpEntry(handles, res, preview, elapsed);
+        setStatus(true);
+        return { res: res, text: text, elapsedMs: elapsed };
+      });
+    }).catch(function (err) {
+      handles.head.textContent = "failed";
+      appendNote(handles.reqBlock, String(err && err.message ? err.message : err));
+      setStatus(false);
+      throw err;
+    });
+  }
+
+  // ---------------- Status indicator ----------------
+
+  var statusDot = document.getElementById("statusDot");
+  var statusText = document.getElementById("statusText");
+
+  function setStatus(ok) {
+    statusDot.className = "status-dot " + (ok ? "is-live" : "is-down");
+    statusText.textContent = ok ? "listening" : "unreachable — is the server running?";
+  }
+
+  fetch("/health").then(function (res) {
+    return res.ok ? res.json() : Promise.reject(new Error("bad status"));
+  }).then(function () {
+    setStatus(true);
+    wireFetch("GET", "/health", { shownHeaders: [] });
+  }).catch(function () {
+    setStatus(false);
+  });
+
+  // ---------------- GET / and POST /echo ----------------
+
+  document.getElementById("btnGetRoot").addEventListener("click", function () {
+    wireFetch("GET", "/", { shownHeaders: [] });
+  });
+
+  var echoMeta = document.getElementById("echoMeta");
+  document.getElementById("btnPostEcho").addEventListener("click", function () {
+    var body = document.getElementById("echoInput").value;
+    wireFetch("POST", "/echo", {
+      headers: { "Content-Type": "text/plain" },
+      shownHeaders: ["Content-Type: text/plain", "Content-Length: " + new TextEncoder().encode(body).length],
+      body: body
+    }).then(function (result) {
+      var matches = result.text === body;
+      echoMeta.innerHTML = "";
+      echoMeta.appendChild(document.createTextNode(
+        result.text.length + " bytes returned, " + result.elapsedMs + " ms — "
+      ));
+      var strong = document.createElement("strong");
+      strong.textContent = matches ? "byte-for-byte match" : "mismatch";
+      echoMeta.appendChild(strong);
+    });
+  });
+
+  // ---------------- /sheep streaming ----------------
+
+  var sheepLog = document.getElementById("sheepLog");
+  var btnSheep = document.getElementById("btnSheep");
+
+  btnSheep.addEventListener("click", function () {
+    btnSheep.disabled = true;
+    sheepLog.innerHTML = "";
+
+    clearEmptyNote();
+    var entry = document.createElement("div");
+    entry.className = "wire-entry";
+    var head = document.createElement("div");
+    head.className = "wire-entry-head";
+    var m = document.createElement("span");
+    m.className = "wire-method"; m.textContent = "GET";
+    var p = document.createElement("span");
+    p.className = "wire-path"; p.textContent = "/sheep";
+    var t = document.createElement("span");
+    t.className = "wire-time"; t.textContent = "streaming…";
+    head.appendChild(m); head.appendChild(p); head.appendChild(t);
+    entry.appendChild(head);
+    var reqBlock = document.createElement("div");
+    reqBlock.className = "wire-block";
+    writeRequestBlock(reqBlock, "GET", "/sheep", []);
+    entry.appendChild(reqBlock);
+    var respBlock = document.createElement("div");
+    respBlock.className = "wire-block is-resp";
+    entry.appendChild(respBlock);
+    wireLog.appendChild(entry);
+    scrollWireToEnd();
+
+    var start = performance.now();
+
+    fetch("/sheep").then(function (res) {
+      var statusLine = document.createElement("div");
+      var statusSpan = document.createElement("span");
+      statusSpan.className = statusClass(res.status);
+      statusSpan.textContent = "HTTP/1.1 " + res.status + " " + res.statusText;
+      statusLine.appendChild(statusSpan);
+      var crlf = document.createElement("span");
+      crlf.className = "wire-crlf"; crlf.textContent = "␍␊";
+      statusLine.appendChild(crlf);
+      respBlock.appendChild(statusLine);
+      res.headers.forEach(function (value, key) { appendLine(respBlock, key + ": " + value); });
+      appendLine(respBlock, "", { crlf: true });
+      scrollWireToEnd();
+
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+
+      function pump() {
+        return reader.read().then(function (result) {
+          if (result.done) {
+            t.textContent = Math.round(performance.now() - start) + " ms total";
+            btnSheep.disabled = false;
+            setStatus(true);
+            return;
+          }
+          var chunkText = decoder.decode(result.value, { stream: true });
+          var elapsed = Math.round(performance.now() - start);
+
+          var line = document.createElement("div");
+          line.className = "wire-body-line";
+          line.textContent = chunkText.replace(/\n$/, "") + "   +" + elapsed + "ms";
+          respBlock.appendChild(line);
+          scrollWireToEnd();
+
+          var row = document.createElement("div");
+          row.className = "sheep-row";
+          var bodySpan = document.createElement("span");
+          bodySpan.className = "sheep-body";
+          bodySpan.textContent = chunkText.replace(/\n$/, "");
+          var tSpan = document.createElement("span");
+          tSpan.className = "sheep-t";
+          tSpan.textContent = "+" + elapsed + "ms";
+          row.appendChild(bodySpan);
+          row.appendChild(tSpan);
+          sheepLog.appendChild(row);
+
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function (err) {
+      appendNote(respBlock, "stream failed: " + (err && err.message ? err.message : err));
+      btnSheep.disabled = false;
+      setStatus(false);
+    });
+  });
+
+  // ---------------- Conditional caching ----------------
+
+  var lastModifiedValue = null;
+  var cacheFetchResult = document.getElementById("cacheFetchResult");
+  var cacheRevalidateResult = document.getElementById("cacheRevalidateResult");
+  var btnRevalidate = document.getElementById("btnCacheRevalidate");
+
+  document.getElementById("btnCacheFetch").addEventListener("click", function () {
+    wireFetch("GET", "/files/hello.html", { shownHeaders: [] }).then(function (result) {
+      lastModifiedValue = result.res.headers.get("Last-Modified");
+      if (lastModifiedValue) {
+        cacheFetchResult.innerHTML = "";
+        cacheFetchResult.appendChild(document.createTextNode("200 · Last-Modified: "));
+        var strong = document.createElement("strong");
+        strong.textContent = lastModifiedValue;
+        cacheFetchResult.appendChild(strong);
+        btnRevalidate.disabled = false;
+      } else {
+        cacheFetchResult.textContent = "200, but no Last-Modified header came back.";
+      }
+    });
+  });
+
+  btnRevalidate.addEventListener("click", function () {
+    if (!lastModifiedValue) return;
+    wireFetch("GET", "/files/hello.html", {
+      headers: { "If-Modified-Since": lastModifiedValue },
+      shownHeaders: ["If-Modified-Since: " + lastModifiedValue]
+    }).then(function (result) {
+      cacheRevalidateResult.innerHTML = "";
+      var strong = document.createElement("strong");
+      strong.textContent = String(result.res.status);
+      cacheRevalidateResult.appendChild(strong);
+      cacheRevalidateResult.appendChild(document.createTextNode(
+        result.res.status === 304 ? " Not Modified — empty body, file not resent." : " — expected 304"
+      ));
+    });
+  });
+
+  // ---------------- Byte ranges ----------------
+
+  var RANGE_TEXT = "Test file content";
+  var byteStrip = document.getElementById("byteStrip");
+  var rangeStart = document.getElementById("rangeStart");
+  var rangeEnd = document.getElementById("rangeEnd");
+  var rangeMeta = document.getElementById("rangeMeta");
+
+  function renderByteStrip() {
+    var start = Math.max(0, Math.min(16, parseInt(rangeStart.value, 10) || 0));
+    var end = Math.max(start + 1, Math.min(17, parseInt(rangeEnd.value, 10) || 17));
+    byteStrip.innerHTML = "";
+    for (var i = 0; i < RANGE_TEXT.length; i++) {
+      var cell = document.createElement("span");
+      cell.className = "byte-cell" + (i >= start && i < end ? " in-range" : "");
+      cell.textContent = RANGE_TEXT[i] === " " ? "·" : RANGE_TEXT[i];
+      byteStrip.appendChild(cell);
+    }
+    return { start: start, end: end };
+  }
+
+  rangeStart.addEventListener("input", renderByteStrip);
+  rangeEnd.addEventListener("input", renderByteStrip);
+  renderByteStrip();
+
+  document.getElementById("btnRange").addEventListener("click", function () {
+    var range = renderByteStrip();
+    var header = "bytes=" + range.start + "-" + (range.end - 1);
+    wireFetch("GET", "/files/test.txt", {
+      headers: { "Range": header },
+      shownHeaders: ["Range: " + header]
+    }).then(function (result) {
+      var contentRange = result.res.headers.get("Content-Range");
+      rangeMeta.innerHTML = "";
+      var strong = document.createElement("strong");
+      strong.textContent = String(result.res.status);
+      rangeMeta.appendChild(strong);
+      rangeMeta.appendChild(document.createTextNode(
+        " " + (contentRange || "") + " → \"" + result.text + "\""
+      ));
+    });
+  });
+
+  // ---------------- WebSocket ----------------
+
+  var ws = null;
+  var heartbeatTimer = null;
+  var wsDot = document.getElementById("wsDot");
+  var wsStatusText = document.getElementById("wsStatusText");
+  var wsInput = document.getElementById("wsInput");
+  var btnWsSend = document.getElementById("btnWsSend");
+  var btnWsConnect = document.getElementById("btnWsConnect");
+
+  function setWsStatus(state) {
+    var map = {
+      connecting: ["is-wait", "connecting…"],
+      open: ["is-live", "open"],
+      closed: ["", "closed"],
+      error: ["is-down", "error"]
+    };
+    var pair = map[state] || map.closed;
+    wsDot.className = "status-dot " + pair[0];
+    wsStatusText.textContent = pair[1];
+  }
+
+  function logWsFrame(direction, text) {
+    clearEmptyNote();
+    var entry = document.createElement("div");
+    entry.className = "wire-entry" + (direction === "out" ? " wire-ws-out" : "");
+    var head = document.createElement("div");
+    head.className = "wire-entry-head";
+    var arrow = document.createElement("span");
+    arrow.className = "wire-arrow";
+    arrow.textContent = direction === "out" ? "→ TEXT" : "← TEXT";
+    var meta = document.createElement("span");
+    meta.className = "wire-path";
+    meta.textContent = direction === "out" ? "fin=1 mask=1" : "fin=1 mask=0";
+    head.appendChild(arrow); head.appendChild(meta);
+    entry.appendChild(head);
+    var block = document.createElement("div");
+    block.className = "wire-block";
+    var line = document.createElement("div");
+    line.className = "wire-body-line";
+    line.textContent = text;
+    block.appendChild(line);
+    entry.appendChild(block);
+    wireLog.appendChild(entry);
+    scrollWireToEnd();
+  }
+
+  function connectWs() {
+    setWsStatus("connecting");
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(proto + "//" + location.host + "/ws");
+
+    ws.addEventListener("open", function () {
+      setWsStatus("open");
+      wsInput.disabled = false;
+      btnWsSend.disabled = false;
+      btnWsConnect.textContent = "Disconnect";
+      heartbeatTimer = setInterval(function () {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send("heartbeat");
+      }, 20000);
+    });
+
+    ws.addEventListener("message", function (event) {
+      logWsFrame("in", event.data);
+    });
+
+    ws.addEventListener("close", function () {
+      setWsStatus("closed");
+      wsInput.disabled = true;
+      btnWsSend.disabled = true;
+      btnWsConnect.textContent = "Connect";
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      ws = null;
+    });
+
+    ws.addEventListener("error", function () {
+      setWsStatus("error");
+    });
+  }
+
+  btnWsConnect.addEventListener("click", function () {
+    if (ws) { ws.close(); return; }
+    connectWs();
+  });
+
+  function sendWsMessage() {
+    var value = wsInput.value;
+    if (!value || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(value);
+    logWsFrame("out", value);
+    wsInput.value = "";
+  }
+
+  btnWsSend.addEventListener("click", sendWsMessage);
+  wsInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") sendWsMessage();
+  });
+
+  // ---------------- Path safety / 404 ----------------
+
+  document.getElementById("btnTraversal").addEventListener("click", function () {
+    wireFetch("GET", "/files/../../etc/passwd", { shownHeaders: [] });
+  });
+
+  document.getElementById("btnMissing").addEventListener("click", function () {
+    wireFetch("GET", "/this-route-does-not-exist", { shownHeaders: [] });
+  });
+})();
+</script>
+</body>
 </html>
